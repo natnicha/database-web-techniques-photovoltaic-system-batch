@@ -6,6 +6,8 @@ name = "pypi"
 [packages]
 psycopg2 = "*"
 pandas = "*"
+xlsxwriter = "*"
+openpyxl = "*"
 
 [dev-packages]
 
