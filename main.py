@@ -1,13 +1,27 @@
+import os
 import psycopg2 as pg
 import pandas.io.sql as psql
 import pandas as pd
 import sys
 import numpy as np
-from datetime import datetime
 from openpyxl import load_workbook
+from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
+from dotenv import load_dotenv
 
-def getInfoFromDB(product_id):    
-    connection = pg.connect("host=localhost dbname=postgres user=postgres password=root")
+def getInfoFromDB(product_id):
+    load_dotenv()
+	# port = os.getenv("DB_PORT")
+
+    url = URL.create(
+        drivername=os.getenv("DB_DRIVER"),
+        host=os.getenv("DB_HOST"),
+        username=os.getenv("DB_USER"),
+        database=os.getenv("DB_NAME"),
+        password=os.getenv("DB_PASSWORD")
+    )   
+    engine = create_engine(url)
+    connection = engine.connect()
     sql_stmt = """SELECT Timezone('Europe/Berlin',w.datetime) as datetime, p.inclination, p.orientation, p.area, p.geolocation[0] as latitude, p.geolocation[1] as longitude, pj.start_at, w.air_temperature, w.humidity, s.name as model_name, s.efficiency
     FROM products p
     LEFT JOIN projects pj ON p.project_id = pj.id
@@ -17,8 +31,6 @@ def getInfoFromDB(product_id):
     AND (w.datetime BETWEEN (pj.start_at - INTERVAL '30 day') AND (pj.start_at + INTERVAL '1 hour'))
     ORDER BY w.datetime 
     """
-    timezone = datetime.now().tzname()
-    connection.cursor(f"SET TIME ZONE {timezone};")
     return psql.read_sql(sql_stmt, connection)
 
 def convertDegToRad(degree):
@@ -28,7 +40,8 @@ def calExtraterrestrialRadiation():
     return
 
 def exportToExcel(dataframe):
-    with pd.ExcelWriter('report.xlsx', engine='xlsxwriter') as writer:
+    uniqueName = str(dataframe['latitude'][0]) +'&'+ str(dataframe['longitude'][0])
+    with pd.ExcelWriter(f'PV-report-{uniqueName}.xlsx', engine='xlsxwriter') as writer:
         header = pd.DataFrame({
             'Project start on': dataframe['start_at'].dt.tz_localize(None),
             'Latitude (°)': dataframe['latitude'][0],
@@ -51,12 +64,9 @@ def exportToExcel(dataframe):
         dataframe.fillna(0).to_excel(writer, sheet_name='hourly-profiles', index=False, 
             columns=['datetime', 'air-temperature (°C)', 'global irradiance on the inclined plane (W/m2)', 'energy (Wh)'])
         writer.sheets['hourly-profiles'].set_column('A:F', 20)
+    return
 
-    file_name = 'report.xlsx'
-    wb = load_workbook(file_name)
-    return wb
-
-def __init__():
+if __name__ == '__main__':
     product_id = sys.argv[1]
     parameters = getInfoFromDB(product_id)
     parameters['latitude-rad'] =  convertDegToRad(parameters['latitude'])
@@ -94,6 +104,5 @@ def __init__():
     parameters['global-radiation'] = parameters['direct-radiation']+parameters['diffuse-radiation']
     loss = 1.0
     parameters['energy (Wh)'] = parameters['area']*parameters['efficiency']/100*parameters['global-radiation']*loss
-    return exportToExcel(parameters)
-
-
+    exportToExcel(parameters)
+    sys.exit(0)
