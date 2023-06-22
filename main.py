@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 
 def getInfoFromDB(product_id):
     load_dotenv()
-	# port = os.getenv("DB_PORT")
 
     url = URL.create(
         drivername=os.getenv("DB_DRIVER"),
@@ -57,7 +56,6 @@ def exportToExcel(dataframe):
         writer.sheets['site-info'].set_column('A:A', 30)
         writer.sheets['site-info'].set_column('B:B', 27)
 
-        # dataframe['datetime'] = dataframe['datetime'].dt.tz_localize(None)
         dataframe['global-radiation'] = dataframe['global-radiation'].round(2)
         dataframe['energy (Wh)'] = dataframe['energy (Wh)'].round(2)
         dataframe = dataframe.rename(columns={'air_temperature': 'air-temperature (°C)', 'global-radiation': 'global irradiance on the inclined plane (W/m2)'})
