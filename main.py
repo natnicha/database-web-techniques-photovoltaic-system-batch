@@ -21,7 +21,7 @@ def getInfoFromDB(product_id):
     )   
     engine = create_engine(url)
     connection = engine.connect()
-    sql_stmt = """SELECT Timezone('Europe/Berlin',w.datetime) as datetime, p.inclination, p.orientation, p.area, p.geolocation[0] as latitude, p.geolocation[1] as longitude, pj.start_at, w.air_temperature, w.humidity, s.name as model_name, s.efficiency
+    sql_stmt = """SELECT Timezone('Europe/Berlin',w.datetime) as datetime, p.inclination, p.orientation, p.area, p.geolocation[0] as latitude, p.geolocation[1] as longitude, pj.start_at, w.air_temperature, w.humidity, s.name as model_name, s.efficiency, pj.user_id
     FROM products p
     LEFT JOIN projects pj ON p.project_id = pj.id
     LEFT JOIN weather w ON w.geolocation ~= p.geolocation 
@@ -39,8 +39,9 @@ def calExtraterrestrialRadiation():
     return
 
 def exportToExcel(dataframe):
+    userId = str(dataframe['user_id'][0])
     uniqueName = str(dataframe['latitude'][0]) +'&'+ str(dataframe['longitude'][0])
-    with pd.ExcelWriter(f'PV-report-{uniqueName}.xlsx', engine='xlsxwriter') as writer:
+    with pd.ExcelWriter(f'{userId}-PV-report-{uniqueName}.xlsx', engine='xlsxwriter') as writer:
         header = pd.DataFrame({
             'Project start on': dataframe['start_at'].dt.tz_localize(None),
             'Latitude (°)': dataframe['latitude'][0],
