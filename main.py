@@ -4,24 +4,26 @@ import pandas.io.sql as psql
 import pandas as pd
 import sys
 import numpy as np
-from openpyxl import load_workbook
 from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
+from sqlalchemy import text
 from dotenv import load_dotenv
 
-def getInfoFromDB(product_id):
+def connectDB():
     load_dotenv()
-
     url = URL.create(
         drivername=os.getenv("DB_DRIVER"),
         host=os.getenv("DB_HOST"),
         username=os.getenv("DB_USER"),
         database=os.getenv("DB_NAME"),
         password=os.getenv("DB_PASSWORD")
-    )   
+    )
     engine = create_engine(url)
-    connection = engine.connect()
-    sql_stmt = """SELECT Timezone('Europe/Berlin',w.datetime) as datetime, p.inclination, p.orientation, p.area, p.geolocation[0] as latitude, p.geolocation[1] as longitude, pj.start_at, w.air_temperature, w.humidity, s.name as model_name, s.efficiency, pj.user_id
+    return engine.connect()
+
+def getInfoFromDB(product_id):
+    connection = connectDB()
+    sql_stmt = """SELECT Timezone('Europe/Berlin',w.datetime) as datetime, p.inclination, p.orientation, p.area, p.geolocation[0] as latitude, p.geolocation[1] as longitude, pj.start_at, w.air_temperature, w.humidity, s.name as model_name, s.efficiency, pj.user_id, p.id as product_id
     FROM products p
     LEFT JOIN projects pj ON p.project_id = pj.id
     LEFT JOIN weather w ON w.geolocation ~= p.geolocation 
@@ -30,18 +32,19 @@ def getInfoFromDB(product_id):
     AND (w.datetime BETWEEN (pj.start_at - INTERVAL '30 day') AND (pj.start_at + INTERVAL '1 hour'))
     ORDER BY w.datetime 
     """
-    return psql.read_sql(sql_stmt, connection)
+    dataframe = psql.read_sql(sql_stmt, connection)
+    connection.close
+    return dataframe
 
 def convertDegToRad(degree):
     return (degree/360)*2*np.pi
 
-def calExtraterrestrialRadiation():
-    return
-
 def exportToExcel(dataframe):
     userId = str(dataframe['user_id'][0])
+    productId = str(dataframe['product_id'][0])
     uniqueName = str(dataframe['latitude'][0]) +'&'+ str(dataframe['longitude'][0])
-    with pd.ExcelWriter(f'{userId}-PV-report-{uniqueName}.xlsx', engine='xlsxwriter') as writer:
+    generatedEnergy = np.round(sum(dataframe.fillna(0)['energy (Wh)'])/1000, 4)
+    with pd.ExcelWriter(f'{userId}-{productId}-PV-report-{uniqueName}.xlsx', engine='xlsxwriter') as writer:
         header = pd.DataFrame({
             'Project start on': dataframe['start_at'].dt.tz_localize(None),
             'Latitude (°)': dataframe['latitude'][0],
@@ -51,7 +54,7 @@ def exportToExcel(dataframe):
             'Area (m^2)': dataframe['area'][0],
             'Panel model model': dataframe['model_name'][0],
             'Panel model efficiency (%)': dataframe['efficiency'][0],
-            'Total generated energy (kWh)': np.round(sum(dataframe.fillna(0)['energy (Wh)'])/1000, 4)
+            'Total generated energy (kWh)': generatedEnergy
         }, index=[0])
         header.T.to_excel(writer, sheet_name='site-info', header=False)
         writer.sheets['site-info'].set_column('A:A', 30)
@@ -63,6 +66,16 @@ def exportToExcel(dataframe):
         dataframe.fillna(0).to_excel(writer, sheet_name='hourly-profiles', index=False, 
             columns=['datetime', 'air-temperature (°C)', 'global irradiance on the inclined plane (W/m2)', 'energy (Wh)'])
         writer.sheets['hourly-profiles'].set_column('A:F', 20)
+    return generatedEnergy
+
+def updateGeneratedEnergy(product_id, generatedEnergy):
+    connection = connectDB()
+    sql_stmt = text("""UPDATE public.products 
+	SET update_at=now(), generated_energy="""+str(generatedEnergy)+""" 
+	WHERE id="""+product_id)
+    connection.execute(sql_stmt)
+    connection.commit()
+    connection.close
     return
 
 if __name__ == '__main__':
@@ -103,5 +116,6 @@ if __name__ == '__main__':
     parameters['global-radiation'] = parameters['direct-radiation']+parameters['diffuse-radiation']
     loss = 1.0
     parameters['energy (Wh)'] = parameters['area']*parameters['efficiency']/100*parameters['global-radiation']*loss
-    exportToExcel(parameters)
+    generatedEnergy = exportToExcel(parameters)
+    updateGeneratedEnergy(product_id, generatedEnergy)
     sys.exit(0)
