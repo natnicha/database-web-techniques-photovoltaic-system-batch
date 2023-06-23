@@ -23,13 +23,13 @@ def connectDB():
 
 def getInfoFromDB(product_id):
     connection = connectDB()
-    sql_stmt = """SELECT Timezone('Europe/Berlin',w.datetime) as datetime, p.inclination, p.orientation, p.area, p.geolocation[0] as latitude, p.geolocation[1] as longitude, pj.start_at, w.air_temperature, w.humidity, s.name as model_name, s.efficiency, pj.user_id, p.id as product_id
+    sql_stmt = """SELECT Timezone('Europe/Berlin',w.datetime) as datetime, p.inclination, p.orientation, p.area, w.latitude, w.longitude, Timezone('Europe/Berlin', pj.start_at) as start_at, w.air_temperature, w.humidity, s.name as model_name, s.efficiency, pj.user_id, p.id as product_id
     FROM products p
     LEFT JOIN projects pj ON p.project_id = pj.id
-    LEFT JOIN weather w ON w.geolocation ~= p.geolocation 
+    LEFT JOIN weather w ON w.latitude = p.geolocation[0] AND w.longitude = p.geolocation[1]
     LEFT JOIN solar_panel_models s ON s.id = p.solar_panel_model_id
     WHERE p.id = """+product_id+"""
-    AND (w.datetime BETWEEN (pj.start_at - INTERVAL '30 day') AND (pj.start_at + INTERVAL '1 hour'))
+    AND (w.datetime >= (cast(TO_CHAR(pj.start_at - INTERVAL '30 day', 'YYYY-MM-DD HH24:00:00') as timestamp)) ) AND (w.datetime < (cast((pj.start_at) as date)))
     ORDER BY w.datetime 
     """
     dataframe = psql.read_sql(sql_stmt, connection)
