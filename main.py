@@ -23,14 +23,47 @@ def connectDB():
 
 def getInfoFromDB(product_id):
     connection = connectDB()
-    sql_stmt = """SELECT Timezone('Europe/Berlin',w.datetime) as datetime, p.inclination, p.orientation, p.area, w.latitude, w.longitude, Timezone('Europe/Berlin', pj.start_at) as start_at, w.air_temperature, w.humidity, s.name as model_name, s.efficiency, pj.user_id, p.id as product_id
-    FROM products p
-    LEFT JOIN projects pj ON p.project_id = pj.id
-    LEFT JOIN weather w ON w.latitude = p.geolocation[0] AND w.longitude = p.geolocation[1]
-    LEFT JOIN solar_panel_models s ON s.id = p.solar_panel_model_id
-    WHERE p.id = """+product_id+"""
-    AND (w.datetime >= (cast(TO_CHAR(pj.start_at - INTERVAL '30 day', 'YYYY-MM-DD HH24:00:00') as timestamp)) ) AND (w.datetime < (cast((pj.start_at) as date)))
-    ORDER BY w.datetime 
+    sql_stmt = """WITH report_range as (
+        Select (CAST((pj.start_at at time zone 'utc' + INTERVAL '30 day') as date) <= CAST(now() as date)) as is_over_30_days
+        , pj.start_at at time zone 'utc' as start_at
+        , p.inclination, p.orientation, p.area
+        , p.geolocation[0] as latitude 
+        , p.geolocation[1] as longitude
+        , p.id as product_id
+        , s.efficiency, s.name as model_name
+        , pj.user_id
+        FROM products p
+        LEFT JOIN projects pj ON p.project_id = pj.id
+        LEFT JOIN solar_panel_models s ON s.id = p.solar_panel_model_id
+        WHERE p.id = """+product_id+"""
+    )
+    , project_info as (
+        SELECT 
+            Case when is_over_30_days
+                then cast(TO_CHAR(r.start_at, 'YYYY-MM-DD HH24:00:00') as timestamp)
+                else cast(cast(now() at time zone 'utc' as date) - INTERVAL '30 day' as timestamp)
+            end as start_weather,
+            Case when is_over_30_days
+                then cast(cast((r.start_at + INTERVAL '30 day') as date) as timestamp)
+                else cast(cast(now() at time zone 'utc' as date) as timestamp)
+            end as end_weather
+            , r.*
+        FROM report_range r
+    )
+
+    SELECT w.datetime at time zone 'utc' as datetime
+        ,  pi.start_at
+        , w.air_temperature, w.humidity
+        , w.latitude, w.longitude
+        , pi.inclination, pi.orientation, pi.area
+        , pi.product_id
+        , pi.user_id
+        , pi.model_name
+        , pi.efficiency
+    FROM project_info pi
+    LEFT JOIN weather w  ON w.latitude = pi.latitude AND w.longitude = pi.longitude
+    WHERE (w.datetime at time zone 'utc' >= pi.start_weather) AND (w.datetime at time zone 'utc' < pi.end_weather)
+    ORDER BY w.datetime
     """
     dataframe = psql.read_sql(sql_stmt, connection)
     connection.close
@@ -46,7 +79,7 @@ def exportToExcel(dataframe):
     generatedEnergy = np.round(sum(dataframe.fillna(0)['energy (Wh)'])/1000, 4)
     with pd.ExcelWriter(f'{userId}-{productId}-PV-report-{uniqueName}.xlsx', engine='xlsxwriter') as writer:
         header = pd.DataFrame({
-            'Project start on': dataframe['start_at'].dt.tz_localize(None),
+            'Project start on (UTC)': dataframe['start_at'].dt.tz_localize(None),
             'Latitude (°)': dataframe['latitude'][0],
             'Longitude (°)': dataframe['longitude'][0],
             'Tilt/Inclination of PV panels (°)': dataframe['inclination'][0],
@@ -60,11 +93,12 @@ def exportToExcel(dataframe):
         writer.sheets['site-info'].set_column('A:A', 30)
         writer.sheets['site-info'].set_column('B:B', 27)
 
+        dataframe['datetime'] = dataframe['datetime'].dt.tz_localize(None)
         dataframe['global-radiation'] = dataframe['global-radiation'].round(2)
         dataframe['energy (Wh)'] = dataframe['energy (Wh)'].round(2)
-        dataframe = dataframe.rename(columns={'air_temperature': 'air-temperature (°C)', 'global-radiation': 'global irradiance on the inclined plane (W/m2)'})
+        dataframe = dataframe.rename(columns={'datetime':'datetime (UTC)', 'air_temperature': 'air-temperature (°C)', 'global-radiation': 'global irradiance on the inclined plane (W/m2)'})
         dataframe.fillna(0).to_excel(writer, sheet_name='hourly-profiles', index=False, 
-            columns=['datetime', 'air-temperature (°C)', 'global irradiance on the inclined plane (W/m2)', 'energy (Wh)'])
+            columns=['datetime (UTC)', 'air-temperature (°C)', 'global irradiance on the inclined plane (W/m2)', 'energy (Wh)'])
         writer.sheets['hourly-profiles'].set_column('A:F', 20)
     return generatedEnergy
 
