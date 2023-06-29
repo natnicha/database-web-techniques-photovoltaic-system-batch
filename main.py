@@ -131,12 +131,12 @@ if __name__ == '__main__':
     parameters['w1'] = parameters[['datetime', 'ST1', 'sunrise', 'sunset']].apply(lambda x: (15* (x['ST1'] - 12)) if ((x['datetime'].hour >= np.floor(x['sunrise'])) & (x['datetime'].hour <= np.ceil(x['sunset']))) else np.nan, axis=1)
     parameters['w2'] = parameters[['datetime', 'ST2', 'sunrise', 'sunset']].apply(lambda x: (15* (x['ST2'] - 12)) if ((x['datetime'].hour >= np.floor(x['sunrise'])) & (x['datetime'].hour <= np.ceil(x['sunset']))) else np.nan, axis=1)
 
-
     parameters['longitude-difference'] = np.arctan(np.sin(parameters['inclination-rad'])*np.sin(parameters['orientation-rad'])/(np.cos(parameters['inclination-rad'])*np.cos(parameters['latitude-rad'])-np.sin(parameters['inclination-rad'])*np.sin(parameters['latitude-rad'])*np.cos(parameters['orientation-rad'])))
     parameters['equivalent-latitude'] = np.arcsin(np.sin(parameters['inclination-rad'])*np.cos(parameters['orientation-rad'])*np.cos(parameters['latitude-rad'])+np.cos(parameters['inclination-rad'])*np.sin(parameters['latitude-rad']))
 
     parameters['E0'] = 1+0.0033*np.cos(2*np.pi*parameters['day-of-year']/365)
     parameters['hourly-extraterrestrial'] = 12/np.pi*1367/24*parameters['E0']*(np.sin(parameters['equivalent-latitude'])*np.cos(convertDegToRad(parameters['declination-angle']))*(np.sin(convertDegToRad(parameters['w2'])+parameters['longitude-difference'])-np.sin(convertDegToRad(parameters['w1'])+parameters['longitude-difference']))+(parameters['w2']-parameters['w1'])*np.pi/180*np.sin(parameters['equivalent-latitude'])*np.sin(convertDegToRad(parameters['declination-angle'])))
+    parameters.loc[parameters['hourly-extraterrestrial'] < 0, 'hourly-extraterrestrial'] = 0
 
     parameters['vapor-presssure'] = 0.611*np.exp(17.3*parameters['air_temperature']/(parameters['air_temperature']+237.3))*parameters['humidity']/100
     parameters['dew-pt'] = (np.log(parameters['vapor-presssure'])+0.4926)/(0.0708-0.00421*np.log((parameters['vapor-presssure'])))
